@@ -656,7 +656,7 @@ summary(urchmod)
 
 #Bring in the data 
 
-ulva <- read_excel("data_raw/experiments/ulva_sanduches/rapid_algal_assays_08_23_17_complete.xlsx") %>%
+ulva <- read.csv("data_raw/experiments/ulva_sanduches/rapid_algal_assays_08_23_17_complete.xlsx") %>%
   #filter(Site == "Las Palmas") %>%
   mutate(mass_lost = Before_weight_total-After_weight_ulva-After_weight_mesh, perc_mass_lost = mass_lost/(Before_weight_total-After_weight_mesh)*100, perc_mass_rem = 100-mass_lost/(Before_weight_total-After_weight_mesh)*100)
 

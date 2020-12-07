@@ -1,0 +1,341 @@
+---
+title: "Test"
+author: "Peyton Fralick"
+date: "11/30/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r}
+# clean up
+rm(list=ls())
+
+# call to core packages for data manipulation
+library(data.table)
+library(fuzzyjoin)
+library(bayesbio)
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(purrr)
+library(assertr)
+library(lubridate)
+library(forcats)
+library(broom) 
+library(reshape2) 
+library(stringr)
+library(kSamples)
+
+# for importing different formats
+library(readr)
+library(readxl)
+library(openxlsx)  
+
+# call to visualisation & output generation
+library(ggplot2)
+library(GGally)
+#library(Cairo)
+library(extrafont) 
+library(RColorBrewer)
+library(viridis)
+library(gridExtra)
+
+# call to community and modelling functionality
+library(vegan)
+library(effsize)
+library(Hmisc)
+library(marelac)
+
+# point to working directory        ## -- will need to adjust for local copy. download the feeding_and_flow folder from the Dryad Repository link [LINK WILL BE ADDED UPON ARTICLE PUBLICATION]. replace the file path in the following command with the path to the feeding_and_flow folder on your computer -- ##
+#setwd("~/Desktop/feeding_and_flow_test")
+
+# Set sites of interest
+
+sites_of_interest <- 
+  c("camano_protected", 
+    "camano_exposed", 
+    "palmas_protected", 
+    "palmas_exposed")
+
+
+
+# Read in data sources
+
+load("data_intermediate/flow/all_flow.rda")
+load("data_intermediate/community/fish_bio.rda") # call to fish biomass data
+load("data_intermediate/community/quad_summary.rda") # call to quadrat data
+
+# call to taxonomy
+taxonomy <- 
+  read_excel("data_raw/concordances/taxonomy/algal_species.xlsx") %>%
+  dplyr::rename(taxa = Morphospecies)
+
+```
+
+```{r}
+# urchin abundance from quadrats
+
+urchins <- read_excel("data_raw/surveys/quadrat_urchins.xlsx") %>%
+  mutate(taxa = "Eucidaris") %>%
+  rename(abundance = Urchins) %>%
+  mutate(z_score = scale(abundance, center= TRUE, scale=TRUE)) %>%
+  dplyr::select(Site, taxa, abundance, z_score) %>%
+  mutate(abundance = abundance*4) # get density per square meter
+
+# urchin exposure data
+
+urch_exp <- read_excel("data_raw/surveys/Urchin Exposure.xlsx") %>%
+  filter(Site %in% sites_of_interest) %>%
+  mutate(refuge = if_else(`Distance to Refuge` > 0, 1, 0)) %>%
+  group_by(Site, Date, Plot) %>%
+  summarise(Refuge = sum(refuge/length(`Distance to Refuge`))) %>%
+  ungroup() %>%
+  mutate(z_score = scale(Refuge, center= TRUE, scale=TRUE)) %>%
+  mutate(taxa = "Refuge") %>%
+  rename(abundance = Refuge) %>%
+  dplyr::select(Site, taxa, abundance, z_score) %>%
+  group_by(Site)%>%
+  summarise(mean_refuge = mean(abundance, na.rm = T),
+            sd_refuge = sd(abundance, na.rm = T))
+
+```
+
+```{r}
+## 2. Create Figure S1: Distribution of flow speeds measured at each site and wave exposure
+
+wave_counts <- all_flow %>%
+  mutate(Season = if_else(Month < 6, "warm", "cool")) %>%
+  mutate(flow3D = round(flow3D, digits = 1)) %>%
+  dplyr::select(flow3D, Site) %>%
+  group_by(Site) %>%
+  mutate(total = length(flow3D)) %>%
+  ungroup() %>%
+  group_by(Site, flow3D) %>%
+  summarise(`Observations/minute` = length(flow3D)/20,
+            total = mean(total)) %>%
+  filter(Site %in% sites_of_interest) %>%
+  ungroup() %>%
+  mutate(Site = fct_recode(Site, `Caamaño exposed` = "camano_exposed", `Caamaño sheltered` = "camano_protected", `Palmas exposed` = "palmas_exposed", `Palmas sheltered` = "palmas_protected")) %>%
+  ggplot(aes(flow3D, `Observations/minute`)) +
+  geom_point(aes(color = Site), alpha = 0.4) +
+  #geom_line(aes(color = Site)) +
+  geom_smooth(aes(color = Site), se = F, size = 2) +
+  geom_smooth(aes(alpha = Site), color = "black", se = F, size = .5) +
+  scale_alpha_manual(values = c(1, 1, 1,1)) +
+  scale_color_viridis(discrete = T, option = "plasma") +
+  theme_bw() +
+  lims(x = c(0, 400)) +
+  theme(legend.position = c(.8,.8)) +
+  labs(x = "Absolute flow speed (cm/s)")
+
+```
+
+
+```{r}
+## 3. Create Table S1: Kolmogorov-Smirnov tests for differences in the distribution of wave-induced flow speeds between sites and wave exposures 
+
+# collate, summarize, and export flow data
+
+# Flow conditions for each run of the experiment
+
+site_flows <- all_flow %>% # collated flow speeds from all measurements at all sites
+  mutate(date = paste(Year, Month, Day, sep = "-")) %>%
+  mutate(date = ymd(date))
+
+warm <- site_flows[site_flows$date >= "2016-11-01" & site_flows$date <= "2017-02-01",] %>%
+  mutate(Season = "warm") # select warm season flow speeds
+
+cool <- site_flows[site_flows$date >= "2017-06-01" & site_flows$date <= "2017-08-31",] %>%
+  mutate(Season = "cool") # select cool season flow speeds
+
+all_flows <- bind_rows(warm, cool) # bring data back together
+
+# Tests of signfiicantly different distributions by Location, period
+
+summ_flow4 <- all_flows %>%
+  filter(Site != "camano_exposed_shallow",
+         Site != "baltra_exposed") %>%
+  mutate(site_season = paste(Site, Season, sep = "_"))
+
+```
+
+```{r}
+load("data_intermediate/flow/all_flow.rda")
+load("data_intermediate/community/fish_bio.rda") # call to fish biomass data
+load("data_intermediate/community/quad_summary.rda") # call to quadrat data
+```
+
+```{r}
+# call to taxonomy
+taxonomy <- 
+  read_excel("data_raw/concordances/taxonomy/algal_species.xlsx") %>%
+  dplyr::rename(taxa = Morphospecies)
+```
+
+
+```{r}
+# create benthic data
+benthic <- 
+  quad_summary %>%
+  left_join(taxonomy, by = "taxa") %>%
+  group_by(Site, 
+           File, 
+           `Functional Group`) %>%
+  summarise(abundance = abundance %>% sum(na.rm = TRUE)) %>%
+  ungroup() %>%
+  spread(`Functional Group`, abundance) %>%
+  mutate(Macroalgae = Filamentous + Foliose + `Corticated Branching/Bushy`) %>%
+  rename(CCA = `Crustose Calcareous`) %>%
+  dplyr::select(Site, 
+                Macroalgae, 
+                CCA) %>%
+  gather(Macroalgae, CCA, key = "taxa", value = "abundance") %>%
+  mutate(abundance = abundance * 100) %>% # get percent cover
+  group_by(taxa) %>%
+  mutate(z_score = abundance %>% scale(center = TRUE, 
+                                       scale  = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+# in-house fish traits
+lab_ids <- 
+  paste0("data_raw/concordances/taxonomy/",
+         "fish_ids.xlsx") %>%
+  read_excel()
+```
+
+```{r}
+# gloabl fish trait database from David Mouillot
+gaspar <- 
+  paste0("data_raw/concordances/traits/",
+         "global_traits_species.xlsx") %>%
+  read_excel() %>%
+  mutate(genus_species = capitalize(as.character(genus_species)))
+
+```
+
+
+```{r}
+fish <- read_excel("data_raw/surveys/herbivory_flow_fish_transects.xlsx") %>%
+  gather(-Site, -Date, -Observer, -Depth, -Temperature, -Water.movement, -Substrate, -Transect, -Block, -Transect.Length, -Block.Length, -Species, -Sick, -Site.Exposure, key = Size, value = Abundance) %>%
+  mutate(Size      = gsub("X", "", Size),
+         Size      = as.numeric(Size),
+         Abundance = ifelse(is.na(Abundance), 0, Abundance)) %>%
+  mutate(Abundance = Abundance*10/Block.Length) %>%
+  right_join(lab_ids, fish, by="Species", all=TRUE) %>%
+  right_join(gaspar, by="genus_species", all=TRUE)
+```
+
+```{r}
+load("data_intermediate/community/urchin_abundance.rda")
+
+urchin_plot <- urchins %>%
+  filter(Site != "camano_exposed_shallow") %>% # remove extra survey data points
+  ggplot(aes(x = value, y = log10(mean_ab+1.1))) +
+  theme_bw()+
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = F, color = "black") +
+  theme_bw() +
+  labs(x="Mean flow (cm/s)",
+       y = "Mean urchin abundance (individuals/5m2)") +
+  #  geom_text(aes(x = 15, y = 0, label = "y = -0.01x + 1.62; p < 0.001; R2 = 0.31")) +
+  theme(axis.title.x = element_text(size = 13),
+        axis.text.x = element_text(size = 11),
+        axis.text.y = element_text(size = 11),
+        axis.title.y = element_text(size = 13)) +
+  xlim(8, 42)
+
+
+# model
+
+urchmod <- lm(mean_ab~value, data = urchins %>%filter(Site != "camano_exposed_shallow"))
+summary(urchmod)
+
+```
+
+
+```{r}
+taxa_order <-
+  c("CCA", 
+    "Macroalgae", 
+    "Surgeonfish", 
+    "Parrotfish", 
+    "Damselfish",
+    "Urchins")
+
+# create site order
+site_order <-
+  c("camano_exposed", 
+    "palmas_exposed", 
+    "camano_protected", 
+    "palmas_protected")
+
+#create data object
+
+surveys <- bind_rows(benthic, fish, urchins) %>%
+  filter(Site!="NA") %>%
+  mutate(taxa = fct_recode(taxa, Parrotfish = "labridae_scarini", Surgeonfish = "acanthuridae", Damselfish = "Pomacentridae", Urchins = "Eucidaris")) %>%
+  mutate(taxa = factor(taxa, levels = c("CCA", "Macroalgae", "Surgeonfish", "Parrotfish", "Damselfish", "Urchins"))) %>%
+  mutate(Site = factor(Site, levels = c("camano_exposed", "palmas_exposed", "camano_protected", "palmas_protected"))) %>%
+  filter(Site != "NA") 
+
+# set sites of interest
+sites_of_interest <-
+  c("camano_protected", 
+    "camano_exposed", 
+    "palmas_protected", 
+    "palmas_exposed")
+
+# correct site namnes
+site <- gsub("_protected", "", sites_of_interest)
+site <- gsub("_exposed", "", site)
+
+# correct exposure names
+exposure <- gsub("camano_", "", sites_of_interest)
+exposure <- gsub("palmas_", "", exposure)
+
+# create site x exposure object
+site_exposure <- 
+  tibble(sites_of_interest, 
+         site, 
+         exposure) %>%
+  rename(Site = sites_of_interest)
+
+```
+
+```{r}
+barplot <- surveys %>%
+  group_by(taxa, Site) %>%
+  summarise(mean_ab = mean(abundance, na.rm = T),
+            serr_ab = sd(abundance, na.rm = T)/sqrt(length(abundance)),
+            n = length(abundance)) %>%
+  mutate(upper = mean_ab + serr_ab,
+         lower = mean_ab - serr_ab) %>%
+  right_join(site_exposure, by = "Site") %>%
+  filter(!is.na(taxa)) %>%
+  ggplot(aes(site, mean_ab, fill = exposure)) +
+  geom_bar(aes(fill = exposure),  position = position_dodge(width = 1), stat = "identity") +
+  geom_errorbar(aes(ymax = upper,
+                    ymin = lower),
+                position = position_dodge(width = 1),
+                stat = "identity",
+                width = .25) +
+  scale_fill_manual(values = c("grey30", "grey80")) +
+  theme_bw() +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = 0, size = 10, vjust = 0.15),
+        axis.text = element_text(size = 12),
+        axis.title = element_blank()) +
+  facet_grid(taxa~., scales = "free_y") +
+  labs(y = "Mean abundance +/- SE",
+       x = "")
+```
+
